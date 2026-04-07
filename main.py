@@ -1,49 +1,50 @@
-import sqlite3
-import json
+import sqlite3, json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from typing import List
+from typing import List, Dict
 
 app = FastAPI()
-
-# --- КОНФИГУРАЦИЯ ---
-SECRET_PASSWORD = "1234" 
+SECRET_PASSWORD = "1234"
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect("chat.db")
-    # Создаем таблицу с ID отправителя и контентом
-    conn.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id TEXT, content TEXT)")
+    # Добавляем room_id, чтобы разделять переписки
+    conn.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT, sender_id TEXT, sender_name TEXT, content TEXT)")
     conn.commit()
     conn.close()
 
-# Удалите старый chat.db перед запуском, если структура поменялась!
 init_db()
 
+# --- МЕНЕДЖЕР КОМНАТ ---
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        # Храним соединения по комнатам: { "room1": [ws1, ws2], "room2": [ws3] }
+        self.rooms: Dict[str, List[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, room_id: str):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        if room_id not in self.rooms:
+            self.rooms[room_id] = []
+        self.rooms[room_id].append(websocket)
         
-        # Отправка истории
+        # Загружаем историю конкретной комнаты
         conn = sqlite3.connect("chat.db")
         cursor = conn.cursor()
-        cursor.execute("SELECT sender_id, content FROM messages ORDER BY id ASC")
+        cursor.execute("SELECT sender_id, sender_name, content FROM messages WHERE room_id = ? ORDER BY id ASC", (room_id,))
         for row in cursor.fetchall():
-            # row[0] - это sender_id, row[1] - это content
-            await websocket.send_text(json.dumps({"sender": row[0], "text": row[1]}))
+            await websocket.send_text(json.dumps({"sender": row[0], "name": row[1], "text": row[2]}))
         conn.close()
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+    def disconnect(self, websocket: WebSocket, room_id: str):
+        if room_id in self.rooms:
+            self.rooms[room_id].remove(websocket)
 
-    async def broadcast(self, message_json: str, sender: WebSocket):
-        for connection in self.active_connections:
-            if connection != sender:
-                await connection.send_text(message_json)
+    async def broadcast(self, message_json: str, room_id: str, sender: WebSocket):
+        if room_id in self.rooms:
+            for connection in self.rooms[room_id]:
+                if connection != sender:
+                    await connection.send_text(message_json)
 
 manager = ConnectionManager()
 
@@ -52,162 +53,152 @@ html = f"""
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fixed Messenger</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Rooms Messenger</title>
+    <script src="https://tailwindcss.com"></script>
     <style>
-        body {{ background: #1e293b; display: flex; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }}
-        .app {{ background: #e6ebee; width: 100%; max-width: 450px; height: 100vh; display: flex; flex-direction: column; position: relative; }}
-        #auth-screen {{ position: absolute; inset: 0; background: #1e293b; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; }}
-        .pass-input {{ padding: 12px; border-radius: 12px; border: none; margin: 15px; text-align: center; width: 200px; outline: none; }}
-        .header {{ background: #517da2; color: white; padding: 15px; text-align: center; font-weight: bold; }}
-        #chat {{ flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }}
-        .msg {{ padding: 10px 14px; border-radius: 14px; font-size: 15px; max-width: 85%; box-shadow: 0 1px 2px rgba(0,0,0,0.1); word-wrap: break-word; }}
-        .msg-in {{ background: white; align-self: flex-start; border-bottom-left-radius: 4px; }}
-        .msg-out {{ background: #effdde; align-self: flex-end; border-bottom-right-radius: 4px; border: 1px solid #dcfce7; }}
-        .input-area {{ background: white; padding: 12px; display: flex; gap: 10px; align-items: center; border-top: 1px solid #ddd; }}
-        input[type="text"] {{ flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ddd; outline: none; }}
-        img, audio {{ max-width: 100%; border-radius: 10px; margin-top: 5px; display: block; }}
-        .btn-icon {{ font-size: 24px; cursor: pointer; border: none; background: none; }}
-        .recording {{ color: red; animation: pulse 1s infinite; }}
-        @keyframes pulse {{ 0% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} 100% {{ opacity: 1; }} }}
+        .screen {{ display: none; height: 100vh; flex-direction: column; background: #f3f4f6; }}
+        .active-screen {{ display: flex; }}
+        .msg-bubble {{ max-width: 80%; padding: 8px 12px; border-radius: 15px; font-size: 14px; }}
+        .msg-in {{ background: white; align-self: flex-start; border-bottom-left-radius: 2px; }}
+        .msg-out {{ background: #dcfce7; align-self: flex-end; border-bottom-right-radius: 2px; }}
     </style>
 </head>
-<body>
-    <div class="app">
-        <div id="auth-screen">
-            <h3>Введите пароль</h3>
-            <input type="password" id="pInp" class="pass-input">
-            <button onclick="login()" style="background: #4f46e5; color: white; border: none; padding: 10px 30px; border-radius: 12px; cursor: pointer;">Войти</button>
-        </div>
+<body class="bg-slate-900">
 
-        <div class="header">Secure Messenger</div>
-        <div id="chat"></div>
-        <div class="input-area">
-             <input type="file" id="fInp" accept="image/*" style="display:none" onchange="sImg()">
-             <button class="btn-icon" onclick="document.getElementById('fInp').click()">📎</button>
-             <button id="vBtn" class="btn-icon" onclick="toggleVoice()">🎙️</button>
-             <input type="text" id="mInp" placeholder="Сообщение..." autocomplete="off">
-             <button onclick="sText()" style="color:#517da2; font-weight:bold; border:none; background:none; cursor:pointer;">ОТПР.</button>
+    <!-- ЭКРАН ПАРОЛЯ -->
+    <div id="scr-auth" class="screen active-screen items-center justify-center text-white">
+        <h1 class="text-2xl font-bold mb-6">Вход в систему</h1>
+        <input type="password" id="pInp" class="w-64 p-3 rounded-xl text-black text-center" placeholder="Пароль">
+        <button onclick="login()" class="mt-4 bg-indigo-600 px-10 py-3 rounded-xl">Войти</button>
+    </div>
+
+    <!-- ЭКРАН СПИСКА ЧАТОВ -->
+    <div id="scr-list" class="screen max-w-md mx-auto border-x bg-white">
+        <div class="bg-indigo-600 p-4 text-white font-bold shadow-md flex justify-between">
+            <span>Мои чаты</span>
+            <button onclick="showScreen('profile')">👤</button>
+        </div>
+        <div class="flex-1 overflow-y-auto">
+            <div onclick="openRoom('general', 'Общий чат')" class="p-4 border-b flex items-center gap-4 hover:bg-gray-50 cursor-pointer">
+                <div class="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-xl">🌍</div>
+                <div><div class="font-bold">Общий чат</div><div class="text-xs text-gray-400">Все участники проекта</div></div>
+            </div>
+            <div onclick="openRoom('work', 'Работа')" class="p-4 border-b flex items-center gap-4 hover:bg-gray-50 cursor-pointer">
+                <div class="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center text-xl">💼</div>
+                <div><div class="font-bold">Рабочие моменты</div><div class="text-xs text-gray-400">Только важные дела</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ЭКРАН ДИАЛОГА -->
+    <div id="scr-chat" class="screen max-w-md mx-auto border-x bg-[#e6ebee]">
+        <div class="bg-indigo-600 p-3 text-white flex items-center gap-3 shadow-md">
+            <button onclick="closeRoom()" class="text-xl">←</button>
+            <div id="chat-title" class="font-bold">Чат</div>
+        </div>
+        <div id="chat-msgs" class="flex-1 p-4 overflow-y-auto flex flex-col gap-3"></div>
+        <div class="p-3 bg-white flex items-center gap-2 border-t">
+            <input type="text" id="mInp" class="flex-1 bg-gray-100 p-2 rounded-full outline-none" placeholder="Сообщение...">
+            <button onclick="sendMsg()" class="bg-indigo-600 text-white w-10 h-10 rounded-full flex items-center justify-center font-bold">></button>
+        </div>
+    </div>
+
+    <!-- ЭКРАН ПРОФИЛЯ -->
+    <div id="scr-profile" class="screen max-w-md mx-auto border-x bg-white">
+        <div class="bg-indigo-600 p-4 text-white font-bold flex gap-4">
+            <button onclick="showScreen('list')">←</button>
+            <span>Профиль</span>
+        </div>
+        <div class="p-8 flex flex-col items-center gap-6">
+            <img id="avatar" src="https://placeholder.com" class="w-24 h-24 rounded-full border-4 border-indigo-100">
+            <input type="text" id="nameInp" class="w-full p-3 border rounded-xl" onchange="saveName()">
+            <button onclick="location.reload()" class="text-red-500 font-bold">Выйти</button>
         </div>
     </div>
 
     <script>
-        // Сохраняем уникальный ID в браузере
-        if (!localStorage.getItem('myChatID')) {{
-            localStorage.setItem('myChatID', 'user_' + Math.floor(Math.random() * 1000000));
-        }}
-        const myID = localStorage.getItem('myChatID');
+        if (!localStorage.getItem('uid')) localStorage.setItem('uid', 'u'+Date.now());
+        const uid = localStorage.getItem('uid');
+        let uName = localStorage.getItem('uname') || "Аноним";
+        let curRoom = null;
+        let ws = null;
 
-        let ws;
-        const chat = document.getElementById('chat');
+        document.getElementById('nameInp').value = uName;
+
+        function showScreen(id) {{
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active-screen'));
+            document.getElementById('scr-'+id).classList.add('active-screen');
+        }}
 
         function login() {{
-            if (document.getElementById('pInp').value === "{SECRET_PASSWORD}") {{
-                document.getElementById('auth-screen').style.display = 'none';
-                startChat();
-            }} else {{ alert("Неверно!"); }}
+            if (document.getElementById('pInp').value === "{SECRET_PASSWORD}") showScreen('list');
+            else alert("Ошибка!");
         }}
 
-        function startChat() {{
-            ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+        function openRoom(id, title) {{
+            curRoom = id;
+            document.getElementById('chat-title').innerText = title;
+            document.getElementById('chat-msgs').innerHTML = "";
+            showScreen('chat');
+            
+            if (ws) ws.close();
+            ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/" + id);
             
             ws.onmessage = (e) => {{
-                try {{
-                    const data = JSON.parse(e.data);
-                    addMsg(data.text, data.sender === myID);
-                }} catch (err) {{ console.error("Ошибка парсинга:", err); }}
+                const data = JSON.parse(e.data);
+                append(data, data.sender === uid);
             }};
         }}
 
-        function addMsg(data, out) {{
-            const d = document.createElement('div');
-            d.className = 'msg ' + (out ? 'msg-out' : 'msg-in');
-            if (data.startsWith("IMG:")) {{
-                const i = document.createElement('img'); i.src = data.replace("IMG:", ""); d.appendChild(i);
-            }} else if (data.startsWith("AUDIO:")) {{
-                const a = document.createElement('audio'); a.controls = true; a.src = data.replace("AUDIO:", ""); d.appendChild(a);
-            }} else {{ d.textContent = data; }}
-            chat.appendChild(d);
-            chat.scrollTop = chat.scrollHeight;
+        function closeRoom() {{
+            if (ws) ws.close();
+            showScreen('list');
         }}
 
-        function sText() {{
+        function append(data, out) {{
+            const box = document.getElementById('chat-msgs');
+            const d = document.createElement('div');
+            d.className = `msg-bubble ${{out ? 'msg-out shadow-sm' : 'msg-in shadow-sm'}}`;
+            d.innerHTML = `<div class="text-[10px] font-bold text-indigo-500 mb-0.5">${{out ? 'Вы' : data.name}}</div>` + data.text;
+            box.appendChild(d);
+            box.scrollTop = box.scrollHeight;
+        }}
+
+        function sendMsg() {{
             const i = document.getElementById('mInp');
             if (i.value && ws) {{
-                const payload = JSON.stringify({{ sender: myID, text: i.value }});
-                ws.send(payload);
-                addMsg(i.value, true);
-                i.value = '';
+                const payload = {{ sender: uid, name: uName, text: i.value, room: curRoom }};
+                ws.send(JSON.stringify(payload));
+                append(payload, true);
+                i.value = "";
             }}
         }}
 
-        function sImg() {{
-            const f = document.getElementById('fInp').files[0];
-            if (!f) return;
-            const r = new FileReader();
-            r.onload = (e) => {{
-                const b = "IMG:" + e.target.result;
-                ws.send(JSON.stringify({{ sender: myID, text: b }}));
-                addMsg(b, true);
-            }};
-            r.readAsDataURL(f);
+        function saveName() {{
+            uName = document.getElementById('nameInp').value;
+            localStorage.setItem('uname', uName);
         }}
 
-        // --- ГОЛОСОВЫЕ ---
-        let mediaRecorder;
-        let audioChunks = [];
-        async function toggleVoice() {{
-            const btn = document.getElementById('vBtn');
-            if (!mediaRecorder || mediaRecorder.state === "inactive") {{
-                const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
-                const mime = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : 'audio/webm';
-                mediaRecorder = new MediaRecorder(stream, {{ mimeType: mime }});
-                audioChunks = [];
-                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-                mediaRecorder.onstop = () => {{
-                    const blob = new Blob(audioChunks, {{ type: mime }});
-                    const r = new FileReader();
-                    r.onload = (e) => {{
-                        const b = "AUDIO:" + e.target.result;
-                        ws.send(JSON.stringify({{ sender: myID, text: b }}));
-                        addMsg(b, true);
-                    }};
-                    r.readAsDataURL(blob);
-                    stream.getTracks().forEach(t => t.stop());
-                }};
-                mediaRecorder.start();
-                btn.classList.add('recording');
-            }} else {{
-                mediaRecorder.stop();
-                btn.classList.remove('recording');
-            }}
-        }}
-
-        document.getElementById("mInp").onkeypress = (e) => {{ if(e.key === "Enter") sText(); }};
+        document.getElementById("mInp").onkeypress = (e) => {{ if(e.key === "Enter") sendMsg(); }};
     </script>
 </body>
 </html>
 """
 
 @app.get("/")
-async def get():
-    return HTMLResponse(html)
+async def get(): return HTMLResponse(html)
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+@app.websocket("/ws/{{room_id}}")
+async def websocket_endpoint(websocket: WebSocket, room_id: str):
+    await manager.connect(websocket, room_id)
     try:
         while True:
-            raw_data = await websocket.receive_text()
-            data = json.loads(raw_data)
-            
-            # Сохраняем в базу
+            raw = await websocket.receive_text()
+            data = json.loads(raw)
             conn = sqlite3.connect("chat.db")
-            conn.execute("INSERT INTO messages (sender_id, content) VALUES (?, ?)", (data['sender'], data['text']))
-            conn.commit()
-            conn.close()
-            
-            # Рассылаем всем кроме себя
-            await manager.broadcast(raw_data, websocket)
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+            conn.execute("INSERT INTO messages (room_id, sender_id, sender_name, content) VALUES (?, ?, ?, ?)", 
+                         (room_id, data['sender'], data['name'], data['text']))
+            conn.commit(); conn.close()
+            await manager.broadcast(raw, room_id, websocket)
+    except WebSocketDisconnect: manager.disconnect(websocket, room_id)
