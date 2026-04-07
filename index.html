@@ -7,6 +7,20 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src='https://meet.jit.si/external_api.js'></script>
     <style>
+        /* Анимация появления уведомления */
+        #call-toast {
+            display: none;
+            position: fixed;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 12px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            z-index: 200;
+            border: 1px solid #517da2;
+        }
         body { background-color: #f0f2f5; }
         /* Фон как в TG */
         .chat-area { 
@@ -27,6 +41,14 @@
     </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden">
+    
+    <div id="call-toast" class="flex items-center space-x-4">
+        <span id="call-text" class="text-sm font-medium text-gray-800"></span>
+        <div class="flex space-x-2">
+            <button onclick="acceptCall()" class="bg-green-500 text-white px-3 py-1 rounded-lg text-xs">Зайти</button>
+            <button onclick="closeToast()" class="bg-gray-200 text-gray-600 px-3 py-1 rounded-lg text-xs">Позже</button>
+        </div>
+    </div>
 
     <div id="video-coll-container">
         <div id="jitsi-container" class="h-full w-full"></div>
