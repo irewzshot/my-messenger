@@ -103,10 +103,30 @@
                 data.data.forEach(m => addMsg(m));
             }
             if (data.type === 'msg') addMsg(data);
-            if (data.type === 'call_notify') {
-                if(confirm(data.sender + " начал видеозвонок. Зайти?")) startVideo();
+    
+            // Вместо confirm показываем наш Toast
+            if (data.type === 'call_notify' && data.sender !== user) {
+                showCallToast(data.sender);
             }
         };
+
+        function showCallToast(sender) {
+            const toast = document.getElementById('call-toast');
+            document.getElementById('call-text').innerText = sender + " начал видеозвонок";
+            toast.style.display = 'flex';
+    
+            // Авто-скрытие через 10 секунд, если никто не нажал
+            setTimeout(closeToast, 10000);
+        }
+
+        function acceptCall() {
+            closeToast();
+            startVideo();
+        }
+
+        function closeToast() {
+            document.getElementById('call-toast').style.display = 'none';
+        }
 
         function addMsg(m) {
             const isMe = m.sender === user;
