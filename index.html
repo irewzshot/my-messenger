@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Семейный Чат</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chat-bg { background-color: #8daaf5; background-image: url("https://www.transparenttextures.com/patterns/cubes.png"); }
+        .msg-in { border-radius: 18px 18px 18px 4px; }
+        .msg-out { border-radius: 18px 18px 4px 18px; background-color: #effdde; }
+    </style>
+</head>
+<body class="h-screen flex flex-col font-sans antialiased bg-gray-100">
+
+    <div class="bg-[#517da2] text-white p-4 shadow-md flex items-center justify-between">
+        <h1 class="font-bold text-lg">👨‍👩‍👧‍👦 Наша Семья</h1>
+        <span id="my-name" class="text-sm opacity-80"></span>
+    </div>
+
+    <div id="chat" class="flex-1 overflow-y-auto p-4 space-y-3 chat-bg"></div>
+
+    <div class="p-3 bg-white border-t flex items-center space-x-2">
+        <input id="input" type="text" placeholder="Сообщение" class="flex-1 p-2 bg-gray-100 rounded-full outline-none px-4 border focus:border-blue-400">
+        <button onclick="send()" class="bg-blue-500 text-white p-2 rounded-full w-10 h-10 flex items-center justify-center hover:bg-blue-600 transition">
+            <svg viewBox="0 0 24 24" class="w-6 h-6 fill-current"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>
+        </button>
+    </div>
+
+    <script>
+        let user = localStorage.getItem('family_user');
+        if (!user) {
+            user = prompt("Введите ваше имя (например, Папа или Мама):");
+            if(user) localStorage.setItem('family_user', user);
+        }
+        document.getElementById('my-name').innerText = user;
+
+        const chat = document.getElementById('chat');
+        const input = document.getElementById('input');
+        
+        // WebSocket URL автоматически подстраивается под хостинг
+        const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${protocol}://${location.host}/ws/${user}`);
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'history') data.data.forEach(m => addMsg(m));
+            if (data.type === 'msg') addMsg(data);
+        };
+
+        function addMsg(m) {
+            const isMe = m.sender === user;
+            const div = document.createElement('div');
+            div.className = `flex ${isMe ? 'justify-end' : 'justify-start'}`;
+            div.innerHTML = `
+                <div class="max-w-[80%] p-3 shadow-sm ${isMe ? 'msg-out text-gray-800' : 'bg-white msg-in text-gray-800'}">
+                    <div class="text-[10px] font-bold ${isMe ? 'text-green-600' : 'text-blue-500'} mb-1">${m.sender}</div>
+                    <div class="text-sm leading-tight">${m.text}</div>
+                </div>
+            `;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function send() {
+            if (!input.value.trim()) return;
+            ws.send(JSON.stringify({ text: input.value }));
+            input.value = '';
+        }
+
+        input.onkeypress = (e) => { if(e.key === 'Enter') send() };
+    </script>
+</body>
+</html>
