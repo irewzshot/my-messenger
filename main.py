@@ -7,7 +7,7 @@ from typing import List
 app = FastAPI()
 
 # --- КОНФИГУРАЦИЯ ---
-SECRET_PASSWORD = "1234"  # <--- ИЗМЕНИТЕ ПАРОЛЬ ЗДЕСЬ
+SECRET_PASSWORD = "Busya.2320"  # <--- ИЗМЕНИТЕ ПАРОЛЬ ЗДЕСЬ
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
