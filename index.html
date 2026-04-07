@@ -3,59 +3,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Семейный Чат + Видео</title>
+    <title>Семейный Чат</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src='https://meet.jit.si/external_api.js'></script>
     <style>
-        .chat-bg { background-color: #8daaf5; background-image: url("https://www.transparenttextures.com/patterns/cubes.png"); }
-        .msg-in { border-radius: 18px 18px 18px 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
-        .msg-out { border-radius: 18px 18px 4px 18px; background-color: #effdde; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+        body { background-color: #f0f2f5; }
+        /* Фон как в TG */
+        .chat-area { 
+            background-color: #8daaf5; 
+            background-image: url("https://www.transparenttextures.com/patterns/cubes.png");
+            background-attachment: fixed;
+        }
+        /* Облачка сообщений */
+        .msg-bubble {
+            max-width: 80%; /* Чтобы не на весь экран */
+            word-wrap: break-word;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+        }
+        .msg-in { border-radius: 15px 15px 15px 5px; background: white; }
+        .msg-out { border-radius: 15px 15px 5px 15px; background: #effdde; }
+        
         #video-coll-container { display: none; position: fixed; inset: 0; z-index: 100; background: black; }
     </style>
 </head>
-<body class="h-screen flex flex-col font-sans antialiased bg-gray-100">
+<body class="h-screen flex flex-col overflow-hidden">
 
     <div id="video-coll-container">
         <div id="jitsi-container" class="h-full w-full"></div>
-        <button onclick="closeVideo()" class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-2 rounded-full font-bold z-[101]">
+        <button onclick="closeVideo()" class="absolute bottom-10 left-1/2 -translate-x-1/2 bg-red-600 text-white px-8 py-3 rounded-full font-bold z-[101] shadow-2xl">
             Завершить звонок
-        </div>
+        </button>
     </div>
 
-    <div class="bg-[#517da2] text-white p-4 shadow-md flex items-center justify-between">
+    <header class="bg-[#517da2] text-white p-3 shadow-lg flex items-center justify-between z-10">
         <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center font-bold text-xl">🏠</div>
+            <div class="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-xl">🏠</div>
             <div>
-                <h1 class="font-bold text-base leading-none">Наша Семья</h1>
-                <span id="my-name" class="text-[10px] opacity-70"></span>
+                <h1 class="font-bold text-sm sm:text-base leading-tight">Наша Семья</h1>
+                <p id="my-name" class="text-[10px] opacity-80 uppercase tracking-wider"></p>
             </div>
         </div>
-        <button onclick="startVideo()" class="bg-green-500 hover:bg-green-600 p-2 rounded-full transition shadow-lg">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <button onclick="startVideo()" class="bg-green-500 p-2.5 rounded-full hover:bg-green-600 transition active:scale-95 shadow-md">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
         </button>
-    </div>
+    </header>
 
-    <div id="chat" class="flex-1 overflow-y-auto p-4 space-y-3 chat-bg"></div>
+    <main id="chat" class="flex-1 overflow-y-auto p-4 space-y-4 chat-area flex flex-col">
+        </main>
 
-    <div class="p-3 bg-white border-t flex items-center space-x-2">
-        <input id="input" type="text" placeholder="Написать..." class="flex-1 p-2 bg-gray-100 rounded-full outline-none px-4 border focus:border-blue-400">
-        <button onclick="send()" class="bg-blue-500 text-white p-2 rounded-full w-10 h-10 flex items-center justify-center hover:bg-blue-600">
+    <footer class="p-3 bg-white flex items-center space-x-2 border-t">
+        <input id="input" type="text" placeholder="Сообщение" 
+               class="flex-1 p-2.5 bg-gray-100 rounded-full outline-none px-5 border focus:border-blue-400 transition-all text-sm">
+        <button onclick="send()" class="bg-[#248bf2] text-white p-2.5 rounded-full hover:bg-blue-600 transition active:scale-90">
             <svg viewBox="0 0 24 24" class="w-5 h-5 fill-current rotate-90"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>
         </button>
-    </div>
+    </footer>
 
     <script>
-        let user = localStorage.getItem('family_user');
-        if (!user) {
-            user = prompt("Ваше имя (Папа, Мама, Я):") || "Гость";
-            localStorage.setItem('family_user', user);
-        }
+        const user = localStorage.getItem('family_user') || prompt("Ваше имя:") || "Гость";
+        localStorage.setItem('family_user', user);
         document.getElementById('my-name').innerText = user;
 
         const chat = document.getElementById('chat');
         const input = document.getElementById('input');
+        
         const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
         const ws = new WebSocket(`${protocol}://${location.host}/ws/${user}`);
 
@@ -63,21 +76,25 @@
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            if (data.type === 'history') data.data.forEach(m => addMsg(m));
+            if (data.type === 'history') {
+                chat.innerHTML = '';
+                data.data.forEach(m => addMsg(m));
+            }
             if (data.type === 'msg') addMsg(data);
             if (data.type === 'call_notify') {
-                if(confirm(`${data.sender} приглашает в видеозвонок. Присоединиться?`)) startVideo();
+                if(confirm(data.sender + " начал видеозвонок. Зайти?")) startVideo();
             }
         };
 
         function addMsg(m) {
             const isMe = m.sender === user;
             const div = document.createElement('div');
-            div.className = `flex ${isMe ? 'justify-end' : 'justify-start'}`;
+            div.className = `flex w-full ${isMe ? 'justify-end' : 'justify-start'}`;
+            
             div.innerHTML = `
-                <div class="max-w-[85%] p-3 ${isMe ? 'msg-out' : 'bg-white msg-in'}">
-                    ${!isMe ? `<div class="text-[10px] font-bold text-blue-500 mb-1">${m.sender}</div>` : ''}
-                    <div class="text-sm">${m.text}</div>
+                <div class="msg-bubble p-3 ${isMe ? 'msg-out' : 'msg-in'}">
+                    ${!isMe ? `<div class="text-[10px] font-bold text-blue-500 mb-0.5">${m.sender}</div>` : ''}
+                    <div class="text-[14px] text-gray-800 leading-snug">${m.text}</div>
                 </div>
             `;
             chat.appendChild(div);
@@ -85,27 +102,20 @@
         }
 
         function send() {
-            if (!input.value.trim()) return;
-            ws.send(JSON.stringify({ type: 'msg', text: input.value }));
+            const text = input.value.trim();
+            if (!text) return;
+            ws.send(JSON.stringify({ type: 'msg', text: text }));
             input.value = '';
         }
 
-        // --- ЛОГИКА ВИДЕО ---
         function startVideo() {
             document.getElementById('video-coll-container').style.display = 'block';
-            
-            // Генерируем уникальное имя комнаты для вашей семьи (измените это слово на свое тайное слово)
-            const domain = "meet.jit.si";
             const options = {
-                roomName: "OurFamilySecretRoom123", // ЗАМЕНИТЕ ЭТО НА СВОЕ
-                width: "100%",
-                height: "100%",
+                roomName: "FamilySecretRoom_ChangeThis", 
                 parentNode: document.querySelector('#jitsi-container'),
                 userInfo: { displayName: user }
             };
-            jitsiApi = new JitsiMeetExternalAPI(domain, options);
-
-            // Оповещаем остальных, что мы начали звонок (по желанию)
+            jitsiApi = new JitsiMeetExternalAPI("meet.jit.si", options);
             ws.send(JSON.stringify({ type: 'call_start' }));
         }
 
@@ -114,22 +124,9 @@
             document.getElementById('video-coll-container').style.display = 'none';
         }
 
-        input.onkeypress = (e) => { if(e.key === 'Enter') send() };
-    </script>
-</body>
-</html>                </div>
-            `;
-            chat.appendChild(div);
-            chat.scrollTop = chat.scrollHeight;
-        }
-
-        function send() {
-            if (!input.value.trim()) return;
-            ws.send(JSON.stringify({ text: input.value }));
-            input.value = '';
-        }
-
-        input.onkeypress = (e) => { if(e.key === 'Enter') send() };
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') send();
+        });
     </script>
 </body>
 </html>
