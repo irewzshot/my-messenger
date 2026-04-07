@@ -62,13 +62,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             data = await websocket.receive_text()
             msg_data = json.loads(data)
             
-            # Сохраняем в базу
-            with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("INSERT INTO messages (sender, text) VALUES (?, ?)", 
-                             (client_id, msg_data["text"]))
-                conn.commit()
-
-            # Рассылаем всем
-            await manager.broadcast({"type": "msg", "sender": client_id, "text": msg_data["text"]})
+            if msg_data.get("type") == "call_start":
+                # Просто рассылаем уведомление всем остальным
+                await manager.broadcast({"type": "call_notify", "sender": client_id})
+            else:
+                # Обычное сообщение
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("INSERT INTO messages (sender, text) VALUES (?, ?)", 
+                                 (client_id, msg_data["text"]))
+                    conn.commit()
+                await manager.broadcast({"type": "msg", "sender": client_id, "text": msg_data["text"]})
     except WebSocketDisconnect:
         manager.disconnect(client_id)
